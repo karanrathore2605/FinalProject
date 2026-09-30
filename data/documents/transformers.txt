@@ -1,0 +1,10 @@
+Transformers are neural network architectures based on the attention mechanism. They process relationships between tokens and can model long-range dependencies efficiently. Self-attention allows each token to assign importance to other tokens in the input. Transformers are widely used in natural language processing and are the basis of many large language models. The architecture commonly contains attention layers, feed-forward layers, residual connections, and normalization layers.
+Transformers are neural network architectures based on the attention mechanism.
+
+They process relationships between tokens and can model long-range dependencies efficiently.
+
+Self-attention allows each token to assign importance to other tokens in the input.
+
+Transformers are widely used in natural language processing and are the basis of many large language models.
+
+A transformer commonly contains attention layers, feed-forward layers, residual connections, and normalization layers.

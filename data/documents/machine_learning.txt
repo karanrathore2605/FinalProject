@@ -1,0 +1,11 @@
+Machine learning is a branch of artificial intelligence that allows
+systems to learn patterns from data.
+
+Supervised learning uses labeled training data. Classification and
+regression are common examples of supervised learning.
+
+Unsupervised learning works with data without predefined labels.
+Clustering is a common unsupervised learning technique.
+
+A machine learning model is trained using data and evaluated using
+appropriate metrics.

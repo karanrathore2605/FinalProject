@@ -1,0 +1,13 @@
+Backpropagation is an algorithm used for training artificial neural
+networks. It calculates the gradient of the loss function with
+respect to the weights of the network.
+
+During backpropagation, the error is propagated backward from the
+output layer toward the input layer. The chain rule of calculus is
+used to calculate gradients for the parameters.
+
+After calculating the gradients, an optimization algorithm such as
+gradient descent can update the network weights.
+
+Backpropagation allows neural networks to learn from their errors
+by adjusting parameters in a direction that reduces the loss.

@@ -1,0 +1,45 @@
+Machine Learning Fundamentals
+Chapter 1: Introduction to Machine Learning
+Machine learning is a branch of artificial intelligence in which computer systems learn patterns from data and
+use those patterns to make predictions or decisions.
+A typical machine learning workflow begins with collecting data, cleaning it, selecting useful features, training
+a model, evaluating the model, and finally deploying it for inference.
+Supervised learning uses labeled examples. Classification predicts categories such as spam or not spam,
+while regression predicts numerical values such as house prices.
+
+Key Points
+• Training data contains examples used to learn patterns.
+• Validation data helps tune model choices.
+• Test data measures performance on unseen examples.
+
+Chapter 2: Model Training and Evaluation
+Training is the process of adjusting a model's parameters so that its predictions become closer to the
+expected outputs. A loss function measures prediction error, and an optimizer changes model parameters to
+reduce that loss.
+Gradient descent is a common optimization method. It calculates the direction in which the loss increases and
+updates parameters in the opposite direction. The learning rate controls the size of each update.
+Overfitting occurs when a model learns the training examples too closely and performs poorly on new data.
+Underfitting occurs when a model is too simple to capture useful patterns.
+Common evaluation metrics include accuracy, precision, recall, F1 score, and mean squared error. The
+appropriate metric depends on the problem and the consequences of different errors.
+
+Key Points
+• Use a validation set for model selection.
+• Tune the learning rate and other hyperparameters carefully.
+• Use regularization or more data to reduce overfitting.
+• Choose evaluation metrics based on the task.
+
+Chapter 3: Neural Networks
+A neural network consists of layers of interconnected computational units. Each unit combines inputs with
+learned weights, adds a bias, and applies an activation function.
+During forward propagation, information moves from the input layer through hidden layers to the output layer.
+During backpropagation, the model calculates gradients of the loss with respect to its parameters.
+Deep learning refers to neural networks with multiple layers. These models can learn useful representations
+from large datasets and are widely used for computer vision, speech, and natural language processing.
+
+Key Points
+• Weights and biases are learned parameters.
+• Activation functions introduce non-linearity.
+• Backpropagation computes gradients used during optimization.
+
+

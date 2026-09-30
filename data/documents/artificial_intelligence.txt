@@ -1,0 +1,12 @@
+Artificial intelligence (AI) is the simulation of human intelligence by machines.
+It encompasses various subfields such as machine learning, natural language processing,
+computer vision, and robotics.
+
+In artificial intelligence, systems are designed to perceive their environment,
+reason about knowledge, process natural language, and take actions to maximize
+the chance of successfully achieving their goals.
+
+Machine learning is a subset of artificial intelligence that focuses on building
+applications that learn from data and improve their accuracy over time without
+being explicitly programmed. Deep learning is a further subset of machine learning
+based on artificial neural networks.
