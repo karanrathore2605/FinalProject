@@ -93,7 +93,6 @@ class DocumentLoader:
                 raise ValueError("PDF has no readable text layers.")
             return "\n\n".join(pages_text)
         except Exception as exc:
-            logger.exception("Error reading PDF '%s'", filename)
             raise ValueError(f"Error reading PDF '{filename}': {exc}") from exc
 
     @classmethod
@@ -111,7 +110,6 @@ class DocumentLoader:
                         paragraphs.append(row_text)
             return "\n\n".join(paragraphs)
         except Exception as exc:
-            logger.exception("Error reading DOCX '%s'", filename)
             raise ValueError(f"Error reading DOCX '{filename}': {exc}") from exc
 
     @classmethod

@@ -1,10 +1,9 @@
 import logging
-import sys
 from dataclasses import dataclass
-from typing import List
+from typing import Dict, List, Optional
 
-from app.services.llm_service import generate_answer
-from app.retrieval.retriever import HybridRetriever, RetrievalResult
+from app.llm_service import generate_answer
+from app.retriever import HybridRetriever, RetrievalResult
 
 logger = logging.getLogger(__name__)
 
@@ -29,20 +28,20 @@ class RAGPipeline:
 
     def search_documents(self, query: str) -> List[RetrievalResult]:
         """Search documents for relevant chunks."""
-        try:
-            return self.retriever.retrieve(query)
-        except Exception:
-            logger.exception("Document retrieval failed for query: %s", query)
-            return []
+        return self.retriever.retrieve(query)
 
-    def answer_question(self, question: str) -> RAGResponse:
-        """Execute grounded RAG answering flow."""
+    def answer_question(
+        self,
+        question: str,
+        history: Optional[List[Dict[str, str]]] = None,
+    ) -> RAGResponse:
+        """Execute grounded RAG answering flow with optional conversational history."""
         results = self.search_documents(question)
 
         if not results:
             return RAGResponse(
                 success=False,
-                answer="Sorry, I couldn't find relevant information in the uploaded document. Please try asking a question related to the document.",
+                answer="I could not find relevant information in the uploaded document to answer this question.",
                 sources=[],
                 retrieval_results=[],
             )
@@ -55,11 +54,11 @@ class RAGPipeline:
             )
         context = "\n\n---\n\n".join(context_blocks)
 
-        prompt = f"""Answer the user's question using ONLY the provided context below.
+        user_content = f"""Answer the user's question using ONLY the provided context below.
 
 Rules:
 1. Ground your answer strictly in the facts provided in the Context.
-2. If the answer cannot be determined from the context, explicitly state: "Sorry, I couldn't find relevant information in the uploaded document. Please try asking a question related to the document."
+2. If the answer cannot be determined from the context, explicitly state: "I could not find this information in the uploaded document."
 3. Do not assume or fabricate facts not mentioned in the context.
 4. When stating facts, you may mention the source document name if relevant.
 
@@ -74,8 +73,17 @@ User Question:
             "You never hallucinate facts and only use facts from the provided context."
         )
 
+        messages: List[Dict[str, str]] = []
+        if history:
+            messages.extend(history[-4:])
+        messages.append({"role": "user", "content": user_content})
+
         try:
-            answer = generate_answer(prompt, system_prompt=system_prompt, temperature=0.1)
+            answer = generate_answer(
+                system_prompt=system_prompt,
+                messages=messages,
+                temperature=0.1,
+            )
             sources = list(dict.fromkeys(res.source for res in results))
 
             return RAGResponse(
@@ -84,11 +92,11 @@ User Question:
                 sources=sources,
                 retrieval_results=results,
             )
-        except Exception:
-            logger.exception("RAG pipeline answer generation failed")
+        except Exception as exc:
+            logger.error("RAG pipeline answer generation failed: %s", exc)
             return RAGResponse(
                 success=False,
-                answer="Sorry, I couldn't process your request right now. Please try again.",
+                answer=f"Error generating answer: {exc}",
                 sources=[],
                 retrieval_results=results,
             )

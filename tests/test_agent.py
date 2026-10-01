@@ -1,11 +1,11 @@
 import pytest
-from app.tools.calculator_tool import calculate, calculator_tool
-from app.loaders.chunker import TextChunker
-from app.services.decision_layer import DecisionLayer
-from app.loaders.document_loader import Document, DocumentLoader
-from app.services.rag_pipeline import RAGPipeline
-from app.retrieval.retriever import HybridRetriever
-from app.retrieval.vector_store import VectorStore
+from app.calculator_tool import calculate, calculator_tool
+from app.chunker import TextChunker
+from app.decision_layer import DecisionLayer
+from app.document_loader import Document, DocumentLoader
+from app.rag_pipeline import RAGPipeline
+from app.retriever import HybridRetriever
+from app.vector_store import VectorStore
 
 
 def test_calculator_basic_operations():

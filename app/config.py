@@ -2,8 +2,8 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Base project directory (Final Task root)
-BASE_DIR = Path(__file__).resolve().parent.parent.parent
+# Base project directory
+BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Load environment variables from .env
 ENV_FILE = BASE_DIR / ".env"
@@ -21,22 +21,14 @@ STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b").strip()
 
-# Streamlit secrets integration (if running inside Streamlit Cloud)
-try:
-    import streamlit as st
-    if hasattr(st, "secrets"):
-        if "GROQ_API_KEY" in st.secrets and not GROQ_API_KEY:
-            GROQ_API_KEY = str(st.secrets["GROQ_API_KEY"]).strip()
-        if "GROQ_MODEL" in st.secrets:
-            GROQ_MODEL = str(st.secrets["GROQ_MODEL"]).strip()
-except Exception:
-    pass
+# Conversational Memory Configuration
+MAX_HISTORY_MESSAGES = int(os.getenv("MAX_HISTORY_MESSAGES", "10"))
 
-# Embedding & Vector Store Configuration (MiniLM ONLY)
-EMBEDDING_MODEL = os.getenv(
-    "EMBEDDING_MODEL",
-    "all-MiniLM-L6-v2"
-).strip()
+# Embedding & Vector Store Configuration
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2").strip().strip("\"'")
+EMBEDDING_FALLBACK_MODEL = os.getenv("EMBEDDING_FALLBACK_MODEL", "all-MiniLM-L6-v2").strip().strip("\"'")
+EMBEDDING_API_URL = os.getenv("EMBEDDING_API_URL", "").strip()
+EMBEDDING_API_KEY = os.getenv("EMBEDDING_API_KEY", "").strip()
 TOP_K = int(os.getenv("TOP_K", "3"))
 SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", "0.08"))
 HYBRID_ALPHA = float(os.getenv("HYBRID_ALPHA", "0.7"))

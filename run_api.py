@@ -6,7 +6,7 @@ Usage:
 
 import sys
 import uvicorn
-from app.core.config import API_HOST, API_PORT
+from app.config import API_HOST, API_PORT
 
 if __name__ == "__main__":
     # Ensure proper encoding on Windows console

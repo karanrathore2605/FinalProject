@@ -19,8 +19,8 @@ Standard LLMs frequently hallucinate facts or produce arithmetic errors when cal
 ## ✨ Features
 
 - **Multi-Format Document Ingestion**: Supports `.pdf` (via `pypdf`), `.txt` (with multi-encoding fallback), and `.docx` (via `python-docx`).
-- **Recursive Character Text Chunking**: Hierarchical recursive text splitting (`["\n\n", "\n", ". ", " ", ""]`) using `RecursiveCharacterTextSplitter` with configurable chunk size (800 chars) and overlap (150 chars) to prevent orphaned heading fragments and preserve semantic continuity.
-- **Dense Vector Search with all-MiniLM-L6-v2**: High-speed dense embeddings using `all-MiniLM-L6-v2` (384-dimensional normalized vectors) with CPU and CUDA auto-selection. Indexed in `faiss-cpu` (`IndexFlatIP`).
+- **Semantic Text Chunking**: Paragraph-aware sliding-window chunking (180 words, 35-word overlap) to prevent orphaned heading fragments and preserve contextual coherence.
+- **Dense Vector Search**: 384-dimensional dense sentence embeddings using `sentence-transformers` (`all-MiniLM-L6-v2`) indexed in `faiss-cpu` (`IndexFlatIP`).
 - **Hybrid Retrieval System**: Combines semantic cosine similarity (70% weight) and IDF-weighted token frequency matching (30% weight) to maximize recall on both conceptual and exact keyword queries.
 - **LLM Decision Layer**: Dynamically determines the required toolchain:
   - `CALCULATOR`: Direct arithmetic calculations.
@@ -30,7 +30,6 @@ Standard LLMs frequently hallucinate facts or produce arithmetic errors when cal
 - **Safe Sandboxed Calculator**: Abstract Syntax Tree (`ast`) based mathematical evaluator supporting `+`, `-`, `*`, `/`, `%`, `**`, parentheses, and percentage normalization (`15%` $\to$ `0.15`). Completely disallows arbitrary code execution, system calls, or builtins.
 - **Strictly Grounded Responses**: Prompts enforce zero hallucination. If a fact is absent from the document, the system explicitly reports that the information was not found.
 - **Transparent Citations & Diagnostics**: Displays source filenames, chunk IDs, semantic similarity scores, keyword scores, hybrid scores, and calculator execution breakdowns in the UI.
-- **Production FastAPI Backend API**: Complete REST API with interactive Swagger documentation (`/docs`), automated health checks, embedding generation, text splitting, document uploading, hybrid search, AST calculator evaluation, and agent chat.
 - **Interactive Streamlit UI**: Modern interface with document upload, sample document selector, index status monitoring, one-click demo presets, and real-time execution diagnostics.
 
 ---
@@ -41,17 +40,15 @@ Standard LLMs frequently hallucinate facts or produce arithmetic errors when cal
 flowchart TD
     subgraph Ingestion["Document Ingestion Pipeline"]
         Doc[Uploaded Document PDF / TXT / DOCX] --> Loader[Document Loader]
-        Loader --> Chunker[Recursive Character Text Splitter]
-        Chunker --> Embeddings[all-MiniLM-L6-v2 Dense Vectors]
+        Loader --> Chunker[Text Chunker & Cleaner]
+        Chunker --> Embeddings[SentenceTransformer all-MiniLM-L6-v2]
         Chunker --> IDF[IDF Token Table]
         Embeddings --> FAISS[(FAISS Vector Store IndexFlatIP)]
     end
 
-    subgraph UserInteraction["User Interface & API"]
+    subgraph UserInteraction["User Interface"]
         User([User]) --> UI[Streamlit Web App]
-        Client([API Client]) --> FastAPI[FastAPI REST Backend]
         UI --> DecisionLayer[LLM Decision Layer]
-        FastAPI --> DecisionLayer
     end
 
     subgraph DecisionRouting["Dynamic Decision Routing"]
@@ -77,7 +74,6 @@ flowchart TD
     CalcTool --> ResponseCard
     DirectLLM --> ResponseCard
     ResponseCard --> UI
-    ResponseCard --> FastAPI
 ```
 
 ---
@@ -87,11 +83,9 @@ flowchart TD
 | Technology | Purpose |
 | :--- | :--- |
 | **Python 3.10+** | Core programming language |
-| **FastAPI 0.110+ & Uvicorn** | High-performance backend REST API |
-| **Streamlit 1.64+** | Interactive web application framework and UI |
+| **Streamlit 1.64+** | Web application framework and UI |
 | **Groq API** | High-performance LLM inference (`openai/gpt-oss-20b`, `llama-3.3-70b-versatile`) |
-| **all-MiniLM-L6-v2** | Fast, lightweight dense semantic embedding model (`all-MiniLM-L6-v2`, 384 dimensions) |
-| **LangChain Text Splitters** | `RecursiveCharacterTextSplitter` for hierarchical document chunking |
+| **Sentence-Transformers** | Dense semantic embedding generation (`all-MiniLM-L6-v2`) |
 | **FAISS CPU** | High-speed vector index and cosine similarity search |
 | **NumPy** | Array manipulations and vector normalization |
 | **PyPDF & Python-Docx** | Text extraction from PDF and Word documents |
@@ -103,26 +97,22 @@ flowchart TD
 ## 📁 Project Structure
 
 ```text
-spundan/
-├── requirements.txt            # Root dependencies (Streamlit Cloud & local)
-│
-└── Final Task/
-    ├── app.py                  # Main Streamlit web application
-    ├── run_api.py              # Entrypoint to run FastAPI backend server
-    ├── README.md               # Complete documentation & architecture
+Final Task/
+├── app.py                      # Main Streamlit web application
+├── requirements.txt            # Project dependencies
+├── README.md                   # Complete documentation & architecture
 ├── .env.example                # Template for environment configuration
 ├── .env                        # Local secrets (ignored by git)
 ├── .gitignore                  # Git ignore rules
 │
 ├── app/
 │   ├── __init__.py             # Package marker
-│   ├── api.py                  # FastAPI REST API backend endpoints & schemas
 │   ├── config.py               # Paths, parameters, and environment validation
 │   ├── llm_service.py          # Groq LLM integration with reasoning fallbacks
 │   ├── calculator_tool.py      # Safe AST-based mathematical evaluator
 │   ├── document_loader.py      # Universal loader for PDF, TXT, and DOCX
-│   ├── chunker.py              # Recursive Character Text Splitter (langchain-text-splitters)
-│   ├── embeddings.py           # all-MiniLM-L6-v2 integration with dynamic dimension detection
+│   ├── chunker.py              # Paragraph-aware text chunker with overlap
+│   ├── embeddings.py           # SentenceTransformer embedding wrapper
 │   ├── vector_store.py         # FAISS vector store with IDF table & persistence
 │   ├── retriever.py            # Hybrid retriever (Dense + Sparse keyword)
 │   ├── rag_pipeline.py         # Grounded RAG execution & prompt construction
@@ -143,9 +133,7 @@ spundan/
 │   └── chunks.pkl
 │
 └── tests/
-    ├── conftest.py             # Pytest configuration
-    ├── test_agent.py           # Agent and RAG unit & integration tests
-    └── test_api.py             # Backend FastAPI endpoint integration tests
+    └── test_agent.py           # Automated unit and integration test suite
 ```
 
 ---
@@ -200,7 +188,7 @@ HYBRID_ALPHA=0.7
 
 ## ▶️ Running the Application
 
-### Option A: Launch the Streamlit Web Application
+Launch the Streamlit web application:
 
 ```bash
 streamlit run app.py
@@ -208,37 +196,6 @@ streamlit run app.py
 
 The application will open automatically in your browser at:
 `http://localhost:8501`
-
-### Option B: Launch the FastAPI Backend API Server
-
-Run the backend REST API:
-
-```bash
-python run_api.py
-```
-Or via uvicorn directly:
-```bash
-python -m uvicorn app.api:app --host 0.0.0.0 --port 8000 --reload
-```
-
-- **Interactive Swagger Documentation**: `http://localhost:8000/docs`
-- **ReDoc Documentation**: `http://localhost:8000/redoc`
-
-#### Key API Endpoints:
-
-| Method | Endpoint | Description |
-| :--- | :--- | :--- |
-| `GET` | `/api/health` | System health, vector store state & embedding model info |
-| `GET` | `/api/models` | Diagnostic parameters for all-MiniLM-L6-v2 & LLM |
-| `POST` | `/api/embed` | Generate dense vector embeddings using all-MiniLM-L6-v2 |
-| `POST` | `/api/split` | Preview text chunking via Recursive Character Text Splitter |
-| `POST` | `/api/documents/upload` | Upload `.pdf`, `.txt`, `.docx` to chunk & index in FAISS |
-| `POST` | `/api/documents/index-text` | Directly index raw text into vector store |
-| `GET` | `/api/documents/status` | Current document and indexed chunk count |
-| `DELETE` | `/api/documents/clear` | Clear indexed document chunks |
-| `POST` | `/api/search` | Dense + sparse hybrid document retrieval |
-| `POST` | `/api/chat` (or `/api/ask`) | Full AI Assistant flow (Decision layer: Math, RAG, or Hybrid) |
-| `POST` | `/api/calculator` | Standalone AST calculator evaluation |
 
 ---
 

@@ -1,13 +1,14 @@
-"""
-FastAPI application routes and endpoint handlers.
-"""
 import io
 import logging
+import uuid
 from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, File, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
 
-from app.core.config import (
+from app.calculator_tool import calculator_tool
+from app.chunker import TextChunker
+from app.config import (
     API_HOST,
     API_PORT,
     CHUNK_OVERLAP,
@@ -18,31 +19,13 @@ from app.core.config import (
     SIMILARITY_THRESHOLD,
     TOP_K,
 )
-from app.loaders.chunker import TextChunker
-from app.loaders.document_loader import Document, DocumentLoader
-from app.retrieval.embeddings import embed_query, embed_texts, get_embedding_info
-from app.retrieval.retriever import HybridRetriever, RetrievalResult
-from app.retrieval.vector_store import VectorStore
-from app.services.decision_layer import AgentResult, DecisionLayer
-from app.services.rag_pipeline import RAGPipeline
-from app.tools.calculator_tool import calculator_tool
-
-from app.api.schemas import (
-    CalculatorRequest,
-    CalculatorResponse,
-    ChatRequest,
-    ChatResponse,
-    DocumentStatusResponse,
-    EmbedRequest,
-    EmbedResponse,
-    HealthResponse,
-    IndexTextRequest,
-    SearchRequest,
-    SearchResponse,
-    SearchResultItem,
-    SplitRequest,
-    SplitResponse,
-)
+from app.decision_layer import AgentResult, DecisionLayer
+from app.document_loader import Document, DocumentLoader
+from app.embeddings import embed_query, embed_texts, get_embedding_info
+from app.memory import get_conversation_manager
+from app.rag_pipeline import RAGPipeline
+from app.retriever import HybridRetriever, RetrievalResult
+from app.vector_store import VectorStore
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +33,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="AI Document Assistant API",
     description=(
-        "REST API backend for AI Document Assistant featuring all-MiniLM-L6-v2, "
+        "REST API backend for AI Document Assistant featuring Qwen 3-Embedding-8B, "
         "Recursive Character Text Splitter, Hybrid RAG Retrieval, and AST Calculator."
     ),
     version="1.0.0",
@@ -87,6 +70,116 @@ def get_shared_pipeline():
         _rag_pipeline = RAGPipeline(_retriever)
         _decision_agent = DecisionLayer(_rag_pipeline)
     return _vector_store, _retriever, _rag_pipeline, _decision_agent
+
+
+# -----------------------------------------------------------------------------
+# PYDANTIC SCHEMAS
+# -----------------------------------------------------------------------------
+class HealthResponse(BaseModel):
+    status: str
+    embedding_model: Dict[str, Any]
+    llm_model: str
+    total_chunks: int
+    is_document_loaded: bool
+    active_document: Optional[str]
+
+
+class EmbedRequest(BaseModel):
+    texts: List[str] = Field(..., description="List of text strings to embed")
+    is_query: bool = Field(False, description="Whether the texts are search queries (applies query prompt for Qwen)")
+
+
+class EmbedResponse(BaseModel):
+    model: str
+    count: int
+    dimension: int
+    embeddings: List[List[float]]
+
+
+class SplitRequest(BaseModel):
+    text: str = Field(..., description="Raw text content to split")
+    chunk_size: Optional[int] = Field(None, description="Max chunk size in characters")
+    chunk_overlap: Optional[int] = Field(None, description="Overlap in characters")
+
+
+class SplitResponse(BaseModel):
+    total_chunks: int
+    chunks: List[str]
+
+
+class SearchRequest(BaseModel):
+    query: str = Field(..., description="Search query string")
+    top_k: Optional[int] = Field(None, description="Number of results to retrieve")
+
+
+class SearchResultItem(BaseModel):
+    chunk_id: int
+    source: str
+    hybrid_score: float
+    semantic_score: float
+    keyword_score: float
+    text: str
+
+
+class SearchResponse(BaseModel):
+    query: str
+    count: int
+    results: List[SearchResultItem]
+
+
+class ChatRequest(BaseModel):
+    query: str = Field(..., description="User question or mathematical instruction")
+    session_id: Optional[str] = Field(None, description="Optional conversation session ID for conversational memory")
+
+
+class ChatResponse(BaseModel):
+    success: bool
+    query: str
+    route: str
+    tool_used: str
+    answer: str
+    sources: List[str]
+    retrieval_results: List[SearchResultItem]
+    expression: Optional[str] = None
+    calculation_result: Optional[str] = None
+    error: Optional[str] = None
+    session_id: Optional[str] = Field(None, description="Active conversation session ID")
+    contextualized_query: Optional[str] = Field(None, description="Contextualized query if reformulated from context")
+
+
+class ClearChatRequest(BaseModel):
+    session_id: str = Field(..., description="Session ID whose conversation history will be cleared")
+
+
+class HistoryMessageItem(BaseModel):
+    role: str
+    content: str
+
+
+class ChatHistoryResponse(BaseModel):
+    session_id: str
+    count: int
+    messages: List[HistoryMessageItem]
+
+
+class CalculatorRequest(BaseModel):
+    expression: str = Field(..., description="Mathematical expression to evaluate (e.g. '25 * 8')")
+
+
+class CalculatorResponse(BaseModel):
+    expression: str
+    result: str
+
+
+class IndexTextRequest(BaseModel):
+    title: str = Field(..., description="Document title / filename identifier")
+    content: str = Field(..., description="Full text content of the document")
+
+
+class DocumentStatusResponse(BaseModel):
+    is_empty: bool
+    total_chunks: int
+    source_documents: List[str]
 
 
 # -----------------------------------------------------------------------------
@@ -142,7 +235,8 @@ def model_info():
 @app.post("/api/embed", response_model=EmbedResponse, tags=["Embeddings"])
 def generate_embeddings(req: EmbedRequest):
     """
-    Generate normalized dense vector embeddings using all-MiniLM-L6-v2.
+    Generate normalized dense vector embeddings using Qwen 3-Embedding-8B.
+    Automatically applies query instructions when is_query=True.
     """
     if not req.texts:
         raise HTTPException(status_code=400, detail="The 'texts' list cannot be empty.")
@@ -159,11 +253,11 @@ def generate_embeddings(req: EmbedRequest):
             dimension=dim,
             embeddings=emb_list,
         )
-    except Exception:
-        logger.exception("Embedding generation failed")
+    except Exception as exc:
+        logger.error("Embedding generation failed: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to generate embeddings. Please try again.",
+            detail=f"Embedding error: {exc}",
         )
 
 
@@ -191,7 +285,7 @@ def preview_text_split(req: SplitRequest):
 async def upload_document(file: UploadFile = File(...)):
     """
     Upload a document (PDF, TXT, DOCX), split it using Recursive Character Text Splitter,
-    generate all-MiniLM-L6-v2 embeddings, and index into FAISS vector store.
+    generate Qwen embeddings, and index into FAISS vector store.
     """
     vs, _, _, _ = get_shared_pipeline()
     filename = file.filename or "uploaded_file"
@@ -210,20 +304,11 @@ async def upload_document(file: UploadFile = File(...)):
             "filename": filename,
             "total_chunks": len(chunks),
             "char_count": len(doc.content),
-            "message": f"Successfully indexed '{filename}' with {len(chunks)} chunks using Recursive Splitter and all-MiniLM-L6-v2 embeddings.",
+            "message": f"Successfully indexed '{filename}' with {len(chunks)} chunks using Recursive Splitter and Qwen embeddings.",
         }
-    except ValueError as val_err:
-        logger.exception("Validation error uploading document %s: %s", filename, val_err)
-        raise HTTPException(
-            status_code=400,
-            detail="Could not process the uploaded file. Please ensure it is a valid, readable TXT, PDF, or DOCX document.",
-        )
-    except Exception:
-        logger.exception("Unexpected error uploading document %s", filename)
-        raise HTTPException(
-            status_code=500,
-            detail="Something went wrong while processing your request. Please try again.",
-        )
+    except Exception as exc:
+        logger.error("Error uploading document %s: %s", filename, exc)
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @app.post("/api/documents/index-text", tags=["Documents"])
@@ -249,12 +334,9 @@ def index_raw_text(req: IndexTextRequest):
             "total_chunks": len(chunks),
             "message": f"Successfully indexed '{req.title}' with {len(chunks)} chunks.",
         }
-    except Exception:
-        logger.exception("Error indexing text: %s", req.title)
-        raise HTTPException(
-            status_code=500,
-            detail="Something went wrong while processing your request. Please try again.",
-        )
+    except Exception as exc:
+        logger.error("Error indexing text: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.get("/api/documents/status", response_model=DocumentStatusResponse, tags=["Documents"])
@@ -281,7 +363,7 @@ def clear_documents():
 @app.post("/api/search", response_model=SearchResponse, tags=["Retrieval"])
 def search_documents(req: SearchRequest):
     """
-    Perform hybrid retrieval (dense semantic all-MiniLM-L6-v2 embeddings + sparse keyword scoring)
+    Perform hybrid retrieval (dense semantic Qwen embeddings + sparse keyword scoring)
     over the indexed document chunks.
     """
     _, retriever, _, _ = get_shared_pipeline()
@@ -311,34 +393,20 @@ def search_documents(req: SearchRequest):
 @app.post("/api/ask", response_model=ChatResponse, tags=["AI Assistant"])
 def chat_or_ask(req: ChatRequest):
     """
-    Execute full intelligent query flow through LLM Decision Layer:
+    Execute full intelligent query flow through LLM Decision Layer with conversational memory:
     - Standalone math -> Calculator Tool
     - Document grounded question -> Hybrid RAG Search
     - Document math -> RAG Context + Calculator Tool
     - General inquiry -> Direct LLM
     """
     if not req.query.strip():
-        return ChatResponse(
-            success=False,
-            query=req.query,
-            route="NONE",
-            tool_used="None",
-            answer="Please enter a question.",
-            sources=[],
-            retrieval_results=[],
-        )
+        raise HTTPException(status_code=400, detail="Query cannot be empty.")
+
+    # Determine or generate session ID for memory isolation
+    session_id = req.session_id or f"session_{uuid.uuid4().hex[:10]}"
 
     _, _, _, agent = get_shared_pipeline()
-    try:
-        result: AgentResult = agent.execute(req.query)
-    except Exception:
-        logger.exception("Unexpected error in chat endpoint")
-        result = AgentResult(
-            success=False,
-            route="ERROR",
-            answer="Something went wrong while processing your request. Please try again.",
-            tool_used="None",
-        )
+    result: AgentResult = agent.execute(req.query, session_id=session_id)
 
     retrieval_items = [
         SearchResultItem(
@@ -362,8 +430,46 @@ def chat_or_ask(req: ChatRequest):
         retrieval_results=retrieval_items,
         expression=result.expression,
         calculation_result=result.calculation_result,
-        error=None,
+        error=result.error,
+        session_id=session_id,
+        contextualized_query=result.contextualized_query,
     )
+
+
+@app.get("/api/chat/history/{session_id}", response_model=ChatHistoryResponse, tags=["AI Assistant"])
+def get_chat_history(session_id: str):
+    """Retrieve conversation history messages for a specific session."""
+    conv_mgr = get_conversation_manager()
+    history = conv_mgr.get_history(session_id)
+    return ChatHistoryResponse(
+        session_id=session_id,
+        count=len(history),
+        messages=[HistoryMessageItem(role=m["role"], content=m["content"]) for m in history],
+    )
+
+
+@app.post("/api/chat/clear", tags=["AI Assistant"])
+def clear_chat_history_post(req: ClearChatRequest):
+    """Clear conversation history for a given session."""
+    conv_mgr = get_conversation_manager()
+    conv_mgr.clear_session(req.session_id)
+    return {
+        "success": True,
+        "session_id": req.session_id,
+        "message": f"Conversation history for session '{req.session_id}' cleared.",
+    }
+
+
+@app.delete("/api/chat/history/{session_id}", tags=["AI Assistant"])
+def clear_chat_history_delete(session_id: str):
+    """Clear conversation history for a given session via DELETE."""
+    conv_mgr = get_conversation_manager()
+    conv_mgr.clear_session(session_id)
+    return {
+        "success": True,
+        "session_id": session_id,
+        "message": f"Conversation history for session '{session_id}' cleared.",
+    }
 
 
 @app.post("/api/calculator", response_model=CalculatorResponse, tags=["Calculator"])
@@ -374,9 +480,5 @@ def calculate_expression(req: CalculatorRequest):
     try:
         val = calculator_tool(req.expression)
         return CalculatorResponse(expression=req.expression, result=val)
-    except Exception:
-        logger.exception("Calculator endpoint failed for '%s'", req.expression)
-        raise HTTPException(
-            status_code=400,
-            detail="Sorry, I couldn't calculate that expression. Please check the mathematical formula and try again.",
-        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))

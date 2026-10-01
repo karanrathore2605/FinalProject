@@ -1,6 +1,5 @@
 # Environment variables
 .env
-*.env
 
 # Python bytecode & cache
 __pycache__/
@@ -14,11 +13,10 @@ venv/
 ENV/
 
 # Vector storage cache
-storage/*
-!storage/.gitkeep
+storage/*.faiss
+storage/*.pkl
 
-# IDE & OS files
-.vscode/
-.idea/
+# OS & Editor files
 .DS_Store
 Thumbs.db
+.vscode/

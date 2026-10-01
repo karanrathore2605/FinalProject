@@ -3,8 +3,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
-from app.core.config import CHUNK_OVERLAP, CHUNK_SIZE
-from app.loaders.document_loader import Document
+from app.config import CHUNK_OVERLAP, CHUNK_SIZE
+from app.document_loader import Document
 
 logger = logging.getLogger(__name__)
 
@@ -137,10 +137,12 @@ class TextChunker:
 
     def split_text(self, text: str) -> List[str]:
         """Split raw text into clean chunks using recursive character splitting."""
+        # Clean form-feeds and normalize linebreaks
         cleaned = text.replace("\x0c", "\n")
         cleaned = re.sub(r"\r\n|\r", "\n", cleaned)
 
         raw_chunks = self._splitter.split_text(cleaned)
+        # Filter out empty or whitespace-only chunks
         return [c.strip() for c in raw_chunks if c.strip()]
 
     def chunk_document(self, document: Document, start_chunk_id: int = 1) -> List[Chunk]:

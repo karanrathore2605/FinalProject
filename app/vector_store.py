@@ -1,4 +1,3 @@
-import json
 import logging
 import math
 import pickle
@@ -10,9 +9,9 @@ from typing import Dict, List, Optional, Set, Tuple
 import faiss
 import numpy as np
 
-from app.core.config import STORAGE_DIR
-from app.loaders.chunker import Chunk
-from app.retrieval.embeddings import embed_texts, get_active_model_name, get_model_dimension
+from app.chunker import Chunk
+from app.config import STORAGE_DIR
+from app.embeddings import embed_texts
 
 logger = logging.getLogger(__name__)
 
@@ -50,8 +49,6 @@ class VectorStore:
         self.chunk_tokens: List[Set[str]] = []
         self.df: Counter = Counter()
         self.total_chunks: int = 0
-        self.model_name: Optional[str] = None
-        self.dimension: Optional[int] = None
 
     def is_empty(self) -> bool:
         """Check if vector store is initialized with indexed chunks."""
@@ -64,8 +61,6 @@ class VectorStore:
         self.chunk_tokens = []
         self.df = Counter()
         self.total_chunks = 0
-        self.model_name = None
-        self.dimension = None
 
     def build_from_chunks(self, chunks: List[Chunk]) -> None:
         """Build FAISS index and keyword statistics from given chunks."""
@@ -83,32 +78,19 @@ class VectorStore:
             for token in tokens:
                 self.df[token] += 1
 
-        # 2. Compute Embeddings with Stage [8] & [9] Logging
-        logger.info("[8] Embedding generation started for %d chunks", len(self.chunks))
+        # 2. Compute Embeddings
         texts = [chunk.text for chunk in self.chunks]
         embeddings = embed_texts(texts)
-        dimension = embeddings.shape[1]
-        logger.info("[9] Embeddings generated: shape %s (dimension=%d)", embeddings.shape, dimension)
 
-        # 3. Create FAISS Index with Stage [10] & [11] Logging
-        logger.info("[10] FAISS index creation (dimension=%d)", dimension)
+        # 3. Create FAISS Index
+        dimension = embeddings.shape[1]
         self.index = faiss.IndexFlatIP(dimension)
         self.index.add(embeddings)
-        self.model_name = get_active_model_name()
-        self.dimension = dimension
-        logger.info("[11] Index creation completed: %d chunks indexed with model '%s'", self.total_chunks, self.model_name)
+        logger.info("Built FAISS index with %d chunks (dim=%d)", self.total_chunks, dimension)
 
     def search_semantic(self, query_embedding: np.ndarray, top_k: int) -> List[Tuple[int, float]]:
         """Search top_k nearest neighbors by cosine similarity."""
         if self.is_empty():
-            return []
-
-        # Validate dimensional compatibility between query and index
-        if query_embedding.shape[1] != self.index.d:
-            logger.error(
-                "Dimension mismatch: Query embedding dimension (%d) does not match FAISS index dimension (%d)",
-                query_embedding.shape[1], self.index.d,
-            )
             return []
 
         k = min(top_k, self.total_chunks)
@@ -157,6 +139,7 @@ class VectorStore:
             if matched_num_phrase:
                 return 1.0
             else:
+                # Chunks missing the specific requested entity phrase are penalised
                 return overlap_score * 0.25
 
         # For general queries, reward bigram sequence matches
@@ -185,7 +168,7 @@ class VectorStore:
         return min(1.0, max(0.0, base_kw))
 
     def save(self, directory: Optional[Path] = None) -> None:
-        """Persist index, chunks, and model metadata to disk."""
+        """Persist index and chunks to disk."""
         target_dir = directory or STORAGE_DIR
         target_dir.mkdir(parents=True, exist_ok=True)
 
@@ -193,24 +176,13 @@ class VectorStore:
             faiss.write_index(self.index, str(target_dir / "index.faiss"))
             with open(target_dir / "chunks.pkl", "wb") as f:
                 pickle.dump(self.chunks, f)
-            meta = {
-                "model_name": self.model_name or get_active_model_name(),
-                "dimension": self.dimension or (self.index.d if self.index else 0),
-                "total_chunks": self.total_chunks,
-            }
-            try:
-                with open(target_dir / "index_meta.json", "w", encoding="utf-8") as f:
-                    json.dump(meta, f, indent=2)
-            except Exception as e:
-                logger.warning("Could not write index metadata: %s", e)
-            logger.info("Saved index, chunks, and metadata to %s", target_dir)
+            logger.info("Saved index and chunks to %s", target_dir)
 
     def load(self, directory: Optional[Path] = None) -> bool:
-        """Load index and chunks from disk if available, checking model dimension compatibility."""
+        """Load index and chunks from disk if available."""
         target_dir = directory or STORAGE_DIR
         index_file = target_dir / "index.faiss"
         chunks_file = target_dir / "chunks.pkl"
-        meta_file = target_dir / "index_meta.json"
 
         if not (index_file.exists() and chunks_file.exists()):
             return False
@@ -225,42 +197,7 @@ class VectorStore:
             for tokens in self.chunk_tokens:
                 for token in tokens:
                     self.df[token] += 1
-
-            if meta_file.exists():
-                try:
-                    with open(meta_file, "r", encoding="utf-8") as f:
-                        meta = json.load(f)
-                        self.model_name = meta.get("model_name")
-                        self.dimension = meta.get("dimension")
-                except Exception:
-                    pass
-
-            current_dim = get_model_dimension()
-            active_model = get_active_model_name()
-            needs_rebuild = False
-
-            if self.index.d != current_dim:
-                logger.warning(
-                    "Saved FAISS index dimension (%d) does not match active embedding model dimension (%d).",
-                    self.index.d, current_dim,
-                )
-                needs_rebuild = True
-            elif self.model_name and self.model_name != active_model:
-                logger.warning(
-                    "Saved FAISS index model '%s' does not match active embedding model '%s'. Rebuilding cleanly...",
-                    self.model_name, active_model,
-                )
-                needs_rebuild = True
-
-            if needs_rebuild:
-                if self.chunks:
-                    logger.info("Rebuilding vector store from %d chunks using '%s'...", len(self.chunks), active_model)
-                    self.build_from_chunks(self.chunks)
-                    self.save(target_dir)
-                else:
-                    self.clear()
-
-            logger.info("Loaded FAISS index with %d chunks (dim=%d, model='%s') from %s", self.total_chunks, self.index.d if self.index else 0, self.model_name or active_model, target_dir)
+            logger.info("Loaded FAISS index with %d chunks from %s", self.total_chunks, target_dir)
             return True
         except Exception as exc:
             logger.warning("Failed to load saved index: %s", exc)

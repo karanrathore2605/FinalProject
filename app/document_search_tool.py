@@ -1,8 +1,5 @@
-import logging
 from typing import Any, Dict, List
-from app.retrieval.retriever import HybridRetriever, RetrievalResult
-
-logger = logging.getLogger(__name__)
+from app.retriever import HybridRetriever, RetrievalResult
 
 
 class DocumentSearchTool:
@@ -33,11 +30,10 @@ class DocumentSearchTool:
                     for r in results
                 ],
             }
-        except Exception:
-            logger.exception("DocumentSearchTool execution failed for query '%s'", query)
+        except Exception as exc:
             return {
                 "success": False,
                 "query": query,
-                "error": "Document search failed",
+                "error": str(exc),
                 "results": [],
             }
